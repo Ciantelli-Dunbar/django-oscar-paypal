@@ -1,11 +1,9 @@
-from __future__ import unicode_literals
-
 from decimal import Decimal as D
 from unittest import TestCase
+from unittest.mock import Mock, patch
+from urllib.parse import parse_qs
 
 import pytest
-from django.utils.six.moves.urllib.parse import parse_qs
-from mock import Mock, patch
 from oscar.apps.shipping.methods import Free
 from purl import URL
 
@@ -67,7 +65,7 @@ class SuccessfulSetExpressCheckoutTests(BaseSetExpressCheckoutTests):
         self.assertTrue(self.url.has_query_param('token'))
         self.assertTrue('_express-checkout', self.url.query_param('cmd'))
 
-    def test_corrent_paypal_params(self):
+    def test_correct_paypal_params(self):
         for param in [
                 'LOCALECODE', 'HDRIMG', 'LANDINGPAGE', 'PAYFLOWCOLOR',
                 'REQCONFIRMSHIPPING', 'PAGESTYLE', 'SOLUTIONTYPE',

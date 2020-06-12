@@ -1,16 +1,13 @@
-from __future__ import unicode_literals
-
 import logging
 from decimal import Decimal as D
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.template.defaultfilters import striptags, truncatewords
-from django.utils import six
 from django.utils.http import urlencode
-from django.utils.translation import ugettext as _
-
+from django.utils.translation import gettext as _
 from localflavor.us import us_states
+
 from paypal import exceptions, gateway
 
 from . import exceptions as express_exceptions
@@ -31,6 +28,8 @@ SALE, AUTHORIZATION, ORDER = 'Sale', 'Authorization', 'Order'
 API_VERSION = getattr(settings, 'PAYPAL_API_VERSION', '119')
 
 logger = logging.getLogger('paypal.express')
+
+buyer_pays_on_paypal = lambda: getattr(settings, 'PAYPAL_BUYER_PAYS_ON_PAYPAL', False)
 
 
 def _format_description(description):
@@ -320,7 +319,7 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         if is_default:
             params['PAYMENTREQUEST_0_SHIPPINGAMT'] = _format_currency(charge)
             params['PAYMENTREQUEST_0_AMT'] += charge
-        params['L_SHIPPINGOPTIONNAME%d' % index] = six.text_type(method.name)
+        params['L_SHIPPINGOPTIONNAME%d' % index] = str(method.name)
         params['L_SHIPPINGOPTIONAMOUNT%d' % index] = _format_currency(charge)
 
     # Set shipping charge explicitly if it has been passed
@@ -349,8 +348,15 @@ def set_txn(basket, shipping_methods, currency, return_url, cancel_url, update_u
         url = 'https://www.sandbox.paypal.com/webscr'
     else:
         url = 'https://www.paypal.com/webscr'
-    params = (('cmd', '_express-checkout'),
-              ('token', txn.token),)
+
+    params = [
+        ('cmd', '_express-checkout'),
+        ('token', txn.token)
+    ]
+
+    if buyer_pays_on_paypal():
+        params.append(('useraction', 'commit'))
+
     return '%s?%s' % (url, urlencode(params))
 
 

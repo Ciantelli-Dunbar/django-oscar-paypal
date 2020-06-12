@@ -1,17 +1,14 @@
-from __future__ import unicode_literals
-
 import logging
 from decimal import Decimal as D
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.models import AnonymousUser
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
-from django.utils import six
 from django.utils.http import urlencode
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 from django.views.generic import RedirectView, View
 from oscar.apps.payment.exceptions import UnableToTakePayment
 from oscar.apps.shipping.methods import FixedPrice, NoShippingRequired
@@ -19,11 +16,10 @@ from oscar.core.exceptions import ModuleNotFoundError
 from oscar.core.loading import get_class, get_model
 
 from paypal.exceptions import PayPalError
-from paypal.express.exceptions import (EmptyBasketException, InvalidBasket,
-                                       MissingShippingAddressException,
-                                       MissingShippingMethodException)
-from paypal.express.facade import (confirm_transaction,
-                                   fetch_transaction_details, get_paypal_url)
+from paypal.express.exceptions import (
+    EmptyBasketException, InvalidBasket, MissingShippingAddressException, MissingShippingMethodException)
+from paypal.express.facade import confirm_transaction, fetch_transaction_details, get_paypal_url
+from paypal.express.gateway import buyer_pays_on_paypal
 
 # Load views dynamically
 PaymentDetailsView = get_class('checkout.views', 'PaymentDetailsView')
@@ -62,14 +58,14 @@ class RedirectView(CheckoutSessionMixin, RedirectView):
             basket = self.build_submission()['basket']
             url = self._get_redirect_url(basket, **kwargs)
         except PayPalError as ppe:
-            messages.error(self.request, six.text_type(ppe))
+            messages.error(self.request, str(ppe))
             if self.as_payment_method:
                 url = reverse('checkout:payment-details')
             else:
                 url = reverse('basket:summary')
             return url
         except InvalidBasket as e:
-            messages.warning(self.request, six.text_type(e))
+            messages.warning(self.request, str(e))
             return reverse('basket:summary')
         except EmptyBasketException:
             messages.error(self.request, _("Your basket is empty"))
@@ -168,15 +164,17 @@ class SuccessResponseView(PaymentDetailsView):
     template_name_preview = 'paypal/express/preview.html'
     preview = True
 
+    error_message = _("A problem occurred communicating with PayPal - please try again later")
+
     @property
     def pre_conditions(self):
         return []
 
     def get(self, request, *args, **kwargs):
         """
-        Fetch details about the successful transaction from PayPal.  We use
-        these details to show a preview of the order with a 'submit' button to
-        place it.
+        Fetch details about the successful transaction from PayPal.
+        We use these details to show a preview of the order with a 'submit' button to place it.
+        The preview step can be skipped with `PAYPAL_BUYER_PAYS_ON_PAYPAL=True` inside settings.
         """
         try:
             self.payer_id = request.GET['PayerID']
@@ -184,32 +182,25 @@ class SuccessResponseView(PaymentDetailsView):
         except KeyError:
             # Manipulation - redirect to basket page with warning message
             logger.warning("Missing GET params on success response page")
-            messages.error(
-                self.request,
-                _("Unable to determine PayPal transaction details"))
+            messages.error(self.request, _("Unable to determine PayPal transaction details"))
             return HttpResponseRedirect(reverse('basket:summary'))
 
         try:
             self.txn = fetch_transaction_details(self.token)
         except PayPalError as e:
-            logger.warning(
-                "Unable to fetch transaction details for token %s: %s",
-                self.token, e)
-            messages.error(
-                self.request,
-                _("A problem occurred communicating with PayPal - please try again later"))
+            logger.warning("Unable to fetch transaction details for token %s: %s", self.token, e)
+            messages.error(self.request, self.error_message)
             return HttpResponseRedirect(reverse('basket:summary'))
 
         # Reload frozen basket which is specified in the URL
         kwargs['basket'] = self.load_frozen_basket(kwargs['basket_id'])
         if not kwargs['basket']:
-            logger.warning(
-                "Unable to load frozen basket with ID %s", kwargs['basket_id'])
-            messages.error(
-                self.request,
-                _("No basket was found that corresponds to your "
-                  "PayPal transaction"))
+            logger.warning("Unable to load frozen basket with ID %s", kwargs['basket_id'])
+            messages.error(self.request, _("No basket was found that corresponds to your PayPal transaction"))
             return HttpResponseRedirect(reverse('basket:summary'))
+
+        if buyer_pays_on_paypal():
+            return self.submit(**self.build_submission(basket=kwargs['basket']))
 
         logger.info(
             "Basket #%s - showing preview with payer ID %s and token %s",
@@ -256,29 +247,28 @@ class SuccessResponseView(PaymentDetailsView):
         We fetch the txn details again and then proceed with oscar's standard
         payment details view for placing the order.
         """
-        error_msg = _(
-            "A problem occurred communicating with PayPal "
-            "- please try again later"
-        )
+        if buyer_pays_on_paypal():
+            return HttpResponseBadRequest()  # we don't expect any user here if we let users buy on PayPal
+
         try:
             self.payer_id = request.POST['payer_id']
             self.token = request.POST['token']
         except KeyError:
             # Probably suspicious manipulation if we get here
-            messages.error(self.request, error_msg)
+            messages.error(self.request, self.error_message)
             return HttpResponseRedirect(reverse('basket:summary'))
 
         try:
             self.txn = fetch_transaction_details(self.token)
         except PayPalError:
             # Unable to fetch txn details from PayPal - we have to bail out
-            messages.error(self.request, error_msg)
+            messages.error(self.request, self.error_message)
             return HttpResponseRedirect(reverse('basket:summary'))
 
         # Reload frozen basket which is specified in the URL
         basket = self.load_frozen_basket(kwargs['basket_id'])
         if not basket:
-            messages.error(self.request, error_msg)
+            messages.error(self.request, self.error_message)
             return HttpResponseRedirect(reverse('basket:summary'))
 
         submission = self.build_submission(basket=basket)
@@ -472,9 +462,9 @@ class ShippingOptionsView(View):
                 charge = method.calculate(basket).incl_tax
 
                 pairs.append(('L_SHIPPINGOPTIONNAME%d' % index,
-                              six.text_type(method.name)))
+                              str(method.name)))
                 pairs.append(('L_SHIPPINGOPTIONLABEL%d' % index,
-                              six.text_type(method.description)))
+                              str(method.description)))
                 pairs.append(('L_SHIPPINGOPTIONAMOUNT%d' % index, charge))
                 # For now, we assume tax and insurance to be zero
                 pairs.append(('L_TAXAMT%d' % index, D('0.00')))
