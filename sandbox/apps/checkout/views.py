@@ -9,8 +9,8 @@ from paypal.payflow import facade
 
 class PaymentDetailsView(views.PaymentDetailsView):
     """
-    An example view that shows how to integrate BOTH Paypal Express
-    (see get_context_data method)and Payppal Flow (the other methods).
+    An example view that shows how to integrate BOTH PayPal Express
+    (see `get_context_data method`) and PayPal Flow (the other methods).
     Naturally, you will only want to use one of the two.
     """
     template_name = 'checkout/payment_details.html'
