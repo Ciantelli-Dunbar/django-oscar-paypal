@@ -19,7 +19,7 @@ class ExpressDashboardApplication(OscarDashboardConfig):
 
     def get_urls(self):
         urlpatterns = [
-            path('transactions/$', self.list_view.as_view(),
+            path('transactions/', self.list_view.as_view(),
                 name='paypal-express-list'),
             path('transactions/<int:pk>/', self.detail_view.as_view(),
                 name='paypal-express-detail'),
