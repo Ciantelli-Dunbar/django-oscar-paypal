@@ -190,7 +190,7 @@ class SuccessResponseView(PaymentDetailsView):
         except PayPalError as e:
             logger.warning("Unable to fetch transaction details for token %s: %s", self.token, e)
             messages.error(self.request, self.error_message)
-            return redirect('basket:summary'))
+            return redirect('basket:summary')
 
         # Reload frozen basket which is specified in the URL
         kwargs['basket'] = self.load_frozen_basket(kwargs['basket_id'])
