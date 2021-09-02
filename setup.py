@@ -17,7 +17,7 @@ setup(
     packages=find_packages(exclude=['sandbox*', 'tests*']),
     include_package_data=True,
     install_requires=[
-        'django>=2.2,<3.2',
+        'django>=2.2,<4',
         'paypal-checkout-serversdk>=1.0.1',
         'requests>=2.26',
         'django-localflavor'
