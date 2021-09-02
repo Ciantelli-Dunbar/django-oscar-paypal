@@ -96,8 +96,11 @@ def fetch_transaction_details(token):
         result = PaymentProcessor().get_order(token)
         transaction.payer_id = result.payer.payer_id
         transaction.email = result.payer.email_address
-        transaction.address_full_name = result.purchase_units[0].shipping.name.full_name
-        transaction.address = json.dumps(result.purchase_units[0].shipping.address.dict())
+        try:
+            transaction.address_full_name = result.purchase_units[0].shipping.name.full_name
+            transaction.address = json.dumps(result.purchase_units[0].shipping.address.dict())
+        except AttributeError:
+            pass
         transaction.status = result.status
         transaction.save()
 
